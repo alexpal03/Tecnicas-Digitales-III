@@ -139,12 +139,7 @@ void main(void) {
 
     
     while (1)
-    {       
-        // Byte de control para sincronizar comunicación serial
-        // uart_tx(0b01010111);
-        
-        
-        
+    {    
         if (rxPrioridad) {
             
             unsigned char pwmValor = (uart_rx() * (int)100)/255;
@@ -266,6 +261,4 @@ void __interrupt() ISR()
         }
         
     }
-    
-    
 }
