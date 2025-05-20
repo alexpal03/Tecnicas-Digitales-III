@@ -1,5 +1,5 @@
 # TODO
 
-* CRC
-* Recepcion RS485
-* Urgente: BMP280
+* CRC              []
+* Recepcion RS485  [listo]
+* Urgente: BMP280  [listo]
