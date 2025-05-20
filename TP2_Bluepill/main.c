@@ -19,9 +19,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
+#include "bmp280.h"
 
 /* USER CODE END Includes */
 
@@ -52,6 +55,10 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
+osThreadId uart1TaskHandle;
+osThreadId uart3TaskHandle;
+osThreadId entradasDatosTaskHandle;
+osThreadId salidasDatosTaskHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -66,6 +73,11 @@ static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_USART1_UART_Init(void);
+void StartUart1Task(void const * argument);
+void StartUart3Task(void const * argument);
+void StartEntradasDatosTask(void const * argument);
+void StartSalidasDatosTask(void const * argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -176,85 +188,61 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-    // Inicialización timers PWM
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // PB5
-    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);  // PB6
+  // Inicialización timers PWM
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // PB5
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);  // PB6
 
-    // Inicio de recepcion serial
-  HAL_UART_Receive_IT(&huart3, recepcion, sizeof(recepcion));
 
   HAL_ADC_Start(&hadc1);  // Inicia la conversión continua
+
+  // Inicio sensor BMP280
+  BMP280_Init(&hspi2, GPIOB, GPIO_PIN_12);
+
+
   /* USER CODE END 2 */
 
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  osThreadDef(uart1Task, StartUart1Task, osPriorityHigh, 0, 128);
+  uart1TaskHandle = osThreadCreate(osThread(uart1Task), NULL);
+
+  osThreadDef(uart3Task, StartUart3Task, osPriorityHigh, 0, 128);
+  uart3TaskHandle = osThreadCreate(osThread(uart3Task), NULL);
+
+  osThreadDef(entradasDatosTask, StartEntradasDatosTask, osPriorityNormal, 0, 128);
+  entradasDatosTaskHandle = osThreadCreate(osThread(entradasDatosTask), NULL);
+
+  osThreadDef(salidasDatosTask, StartSalidasDatosTask, osPriorityNormal, 0, 128);
+  salidasDatosTaskHandle = osThreadCreate(osThread(salidasDatosTask), NULL);
+
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-	  // Lectura ADC
-	  uint16_t valores_adc_PA[3]; // PA0 PA1 PA2
-
-	  for (int i = 0; i < 3; i++)
-	  {
-		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-		valores_adc_PA[i] = HAL_ADC_GetValue(&hadc1);
-	  }
-
-	  // Almacenar entradas analogicas
-	  	  // El byte menos significativo se encuentra en el indice mas chico del arreglo respuesta
-	  	  transmision[1] = valores_adc_PA[0] & 0xFF;
-	  	  transmision[2] = (valores_adc_PA[0] >> 8) & 0xFF;
-	  	  transmision[3] = valores_adc_PA[1] & 0xFF;
-	  	  transmision[4] = (valores_adc_PA[1] >> 8) & 0xFF;
-	  	  transmision[5] = valores_adc_PA[2] & 0xFF;
-	  	  transmision[6] = (valores_adc_PA[2] >> 8) & 0xFF;
-
-
-	  	  // Almacenar entradas digitales
-	  	  transmision[7] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_15) == GPIO_PIN_SET;
-	        transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) << 1;
-	        transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET) << 2;
-
-			// Habilito transmision.
-	        // Deshabilito recepcion
-		 //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
-			 // HAL_UART_Transmit(&huart1, transmision, sizeof(transmision), 100);
-
-
-	        if (!transmitiendo_tx3)
-	        	  {
-	        	     transmitiendo_tx3 = 1;
-	        		  HAL_UART_Transmit_IT(&huart3, transmision, sizeof(transmision));
-
-	        		  HAL_Delay(100);
-	        	  }
-
-	  	        // Recepcion de datos
-
-	  	  	  if (crc_valido || 1) {
-	  	  		  // Seteo de entradas digitales
-	  	  		  if (recepcion[1] & 1) {
-	  	  		    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-	  	  		  } else {
-	  	  		    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-	  	  		  }
-
-	  	  		  if ((recepcion[1] >> 1) & 1) {
-	  	  		    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
-	  	  		  } else {
-	  	  		    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
-	  	  		  }
-
-	  	  		  if ((recepcion[1] >> 2) & 1) {
-	  	  		    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
-	  	  		  } else {
-	  	  		    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
-	  	  		  }
-
-	  	  		  // Seteo de duty cycle del PWM
-	  	  		  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, recepcion[2]); // PB5
-	  	  		  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, recepcion[3]); // PB6
-	  	  	  }
 
     /* USER CODE END WHILE */
 
@@ -411,11 +399,11 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_16BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -544,7 +532,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 9600;
+  huart1.Init.BaudRate = 115200;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -614,6 +602,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -640,11 +631,146 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+
+  /*Configure GPIO pins : PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
 }
 
 /* USER CODE BEGIN 4 */
+void StartUart1Task(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+
+  for(;;)
+  {
+	  // Habilito transmision.
+	  // Deshabilito recepcion
+
+	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
+	  HAL_UART_Transmit(&huart1, transmision, sizeof(transmision), 10);
+	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+	  HAL_UART_Receive(&huart1, recepcion, sizeof(recepcion), 500);
+
+
+	  osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+void StartUart3Task(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+
+	HAL_UART_Receive_IT(&huart3, recepcion, sizeof(recepcion));
+
+	/* Infinite loop */
+	for(;;)
+	{
+
+		if (!transmitiendo_tx3)
+		{
+			transmitiendo_tx3 = 1;
+			HAL_UART_Transmit_IT(&huart3, transmision, sizeof(transmision));
+
+			osDelay(500);
+		}
+	}
+  /* USER CODE END 5 */
+}
+
+void StartEntradasDatosTask(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+
+	// Lectura ADC
+	uint16_t valores_adc_PA[3]; // PA0 PA1 PA2
+
+	for (int i = 0; i < 3; i++)
+	{
+		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+		valores_adc_PA[i] = HAL_ADC_GetValue(&hadc1);
+	}
+
+	// Almacenar entradas analogicas
+	// El byte menos significativo se encuentra en el indice mas chico del arreglo respuesta
+	transmision[1] = valores_adc_PA[0] & 0xFF;
+	transmision[2] = (valores_adc_PA[0] >> 8) & 0xFF;
+	transmision[3] = valores_adc_PA[1] & 0xFF;
+	transmision[4] = (valores_adc_PA[1] >> 8) & 0xFF;
+	transmision[5] = valores_adc_PA[2] & 0xFF;
+	transmision[6] = (valores_adc_PA[2] >> 8) & 0xFF;
+
+
+	// Almacenar entradas digitales
+	transmision[7] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_15) == GPIO_PIN_SET;
+	transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) << 1;
+	transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET) << 2;
+
+	float temp_f = BMP280_ReadTemperature();   // °C
+	float press_f = BMP280_ReadPressure();     // hPa
+
+	transmision[8] = (uint8_t)temp_f;
+	transmision[9] = (((uint16_t)press_f) >> 8) & 0xFF;
+	transmision[10] = ((uint16_t)press_f) & 0xFF;
+
+	transmision[11] |= calcular_crc(transmision, 11);
+
+
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+void StartSalidasDatosTask(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+
+	// Recepcion de datos
+
+	if (crc_valido || 1) {
+	  // Seteo de entradas digitales
+	  if (recepcion[1] & 1) {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+	  } else {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+	  }
+
+	  if ((recepcion[1] >> 1) & 1) {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+	  } else {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+	  }
+
+	  if ((recepcion[1] >> 2) & 1) {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
+	  } else {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
+	  }
+
+	  // Seteo de duty cycle del PWM
+	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, recepcion[2]); // PB5
+	  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, recepcion[3]); // PB6
+	}
+
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
 
 /* USER CODE END 4 */
+
 
 /**
   * @brief  This function is executed in case of error occurrence.
