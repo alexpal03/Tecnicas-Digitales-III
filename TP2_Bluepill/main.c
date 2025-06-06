@@ -23,7 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
+#include <stdlib.h>
 #include "bmp280.h"
 
 /* USER CODE END Includes */
@@ -45,8 +46,6 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
-CRC_HandleTypeDef hcrc;
-
 SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim3;
@@ -55,12 +54,12 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
+osThreadId defaultTaskHandle;
+/* USER CODE BEGIN PV */
 osThreadId uart1TaskHandle;
 osThreadId uart3TaskHandle;
 osThreadId entradasDatosTaskHandle;
 osThreadId salidasDatosTaskHandle;
-/* USER CODE BEGIN PV */
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -68,18 +67,17 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_SPI2_Init(void);
-static void MX_CRC_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_USART1_UART_Init(void);
+
+/* USER CODE BEGIN PFP */
+
 void StartUart1Task(void const * argument);
 void StartUart3Task(void const * argument);
 void StartEntradasDatosTask(void const * argument);
 void StartSalidasDatosTask(void const * argument);
-
-/* USER CODE BEGIN PFP */
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -106,28 +104,20 @@ uint8_t transmision[12] = {STX, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 uint8_t recepcion[5] = {STX, 0, 0, 0, 0};
 
 
-
-
 uint8_t calcular_crc(uint8_t* cadena, uint8_t longitud) {
 
-	// cadena es el mensaje incluyendo el crc
-	// longitud es la de la cadena incluyendo el crc
-
-	// Cantidad de palabras, cada palabra son 4 bytes de datos, se debe redondear
-	// al multiplo de 4 por encima mas cercano
-	uint8_t palabras = ((longitud - 1) + 3) & ~0x03;
-
-	uint8_t* cadena_sin_crc = (uint8_t*)malloc(palabras);
-	memcpy(cadena_sin_crc, cadena, longitud - 1); // copiamos solo los datos (sin el CRC)
-
-	// Convertimos a uint32_t* para usar con HAL_CRC_Calculate
-	uint32_t* cadena_sin_crc32 = (uint32_t*)cadena_sin_crc;
-	uint32_t crc_calculado = HAL_CRC_Calculate(&hcrc, cadena_sin_crc32, palabras);
-
-	free(cadena_sin_crc);
-
-	// Retorna solo 1 byte del CRC
-	return crc_calculado & 0xFF;
+	const uint8_t poly = 0x07;
+	uint8_t crc = 0x00;
+	for (size_t i = 0; i < longitud; ++i) {
+		crc ^= cadena[i];
+		for (uint8_t j = 0; j < 8; ++j) {
+			if (crc & 0x80)
+				crc = (crc << 1) ^ poly;
+			else
+				crc <<= 1;
+		}
+	}
+	return crc;
 }
 
 
@@ -143,10 +133,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	// Se ejecuta cuando la transmisión finaliza
-    if (huart->Instance == USART3)
-    {
-        transmitiendo_tx3 = 0; // Establece la bandera cuando la transmisión finaliza
-    }
+	if (huart->Instance == USART3)
+  {
+		transmitiendo_tx3 = 0; // Establece la bandera cuando la transmisión finaliza
+  }
 }
 
 
@@ -158,6 +148,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
   /* USER CODE END 1 */
 
@@ -181,7 +172,6 @@ int main(void)
   MX_GPIO_Init();
   MX_USART3_UART_Init();
   MX_SPI2_Init();
-  MX_CRC_Init();
   MX_ADC1_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
@@ -196,7 +186,7 @@ int main(void)
   HAL_ADC_Start(&hadc1);  // Inicia la conversión continua
 
   // Inicio sensor BMP280
-  BMP280_Init(&hspi2, GPIOB, GPIO_PIN_12);
+  //BMP280_Init(&hspi2, GPIOB, GPIO_PIN_12);
 
 
   /* USER CODE END 2 */
@@ -217,28 +207,29 @@ int main(void)
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
-  /* Create the thread(s) */
-  osThreadDef(uart1Task, StartUart1Task, osPriorityHigh, 0, 128);
-  uart1TaskHandle = osThreadCreate(osThread(uart1Task), NULL);
-
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
   osThreadDef(uart3Task, StartUart3Task, osPriorityHigh, 0, 128);
   uart3TaskHandle = osThreadCreate(osThread(uart3Task), NULL);
 
-  osThreadDef(entradasDatosTask, StartEntradasDatosTask, osPriorityNormal, 0, 128);
-  entradasDatosTaskHandle = osThreadCreate(osThread(entradasDatosTask), NULL);
+  osThreadDef(uart1Task, StartUart1Task, osPriorityHigh, 0, 128);
+  uart1TaskHandle = osThreadCreate(osThread(uart1Task), NULL);
+
 
   osThreadDef(salidasDatosTask, StartSalidasDatosTask, osPriorityNormal, 0, 128);
   salidasDatosTaskHandle = osThreadCreate(osThread(salidasDatosTask), NULL);
 
+  osThreadDef(entradasDatosTask, StartEntradasDatosTask, osPriorityNormal, 0, 128);
+  entradasDatosTaskHandle = osThreadCreate(osThread(entradasDatosTask), NULL);
 
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+
   /* USER CODE END RTOS_THREADS */
 
   /* Start scheduler */
   osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -264,21 +255,25 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
@@ -286,7 +281,7 @@ void SystemClock_Config(void)
     Error_Handler();
   }
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -310,6 +305,7 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 1 */
 
   /* USER CODE END ADC1_Init 1 */
+
   /** Common config
   */
   hadc1.Instance = ADC1;
@@ -323,6 +319,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_0;
@@ -332,6 +329,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_1;
@@ -340,6 +338,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_2;
@@ -351,32 +350,6 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
-  * @brief CRC Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CRC_Init(void)
-{
-
-  /* USER CODE BEGIN CRC_Init 0 */
-
-  /* USER CODE END CRC_Init 0 */
-
-  /* USER CODE BEGIN CRC_Init 1 */
-
-  /* USER CODE END CRC_Init 1 */
-  hcrc.Instance = CRC;
-  if (HAL_CRC_Init(&hcrc) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN CRC_Init 2 */
-
-  /* USER CODE END CRC_Init 2 */
 
 }
 
@@ -399,11 +372,11 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_16BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -590,6 +563,9 @@ static void MX_USART3_UART_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -601,9 +577,6 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -631,14 +604,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
 
-  /*Configure GPIO pins : PB12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -652,11 +620,10 @@ void StartUart1Task(void const * argument)
 	  // Habilito transmision.
 	  // Deshabilito recepcion
 
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
 	  HAL_UART_Transmit(&huart1, transmision, sizeof(transmision), 10);
 	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
 	  HAL_UART_Receive(&huart1, recepcion, sizeof(recepcion), 500);
-
 
 	  osDelay(1);
   }
@@ -715,8 +682,8 @@ void StartEntradasDatosTask(void const * argument)
 	transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) << 1;
 	transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET) << 2;
 
-	float temp_f = BMP280_ReadTemperature();   // °C
-	float press_f = BMP280_ReadPressure();     // hPa
+	float temp_f = 0;//BMP280_ReadTemperature();   // °C
+	float press_f =0;// BMP280_ReadPressure();     // hPa
 
 	transmision[8] = (uint8_t)temp_f;
 	transmision[9] = (((uint16_t)press_f) >> 8) & 0xFF;
@@ -725,7 +692,7 @@ void StartEntradasDatosTask(void const * argument)
 	transmision[11] |= calcular_crc(transmision, 11);
 
 
-    osDelay(1);
+	osDelay(1);
   }
   /* USER CODE END 5 */
 }
@@ -734,42 +701,41 @@ void StartSalidasDatosTask(void const * argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
+
   for(;;)
   {
-
 	// Recepcion de datos
 
-	if (crc_valido || 1) {
-	  // Seteo de entradas digitales
-	  if (recepcion[1] & 1) {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-	  } else {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-	  }
+		if (crc_valido) {
+			// Seteo de entradas digitales
+			if (recepcion[1] & 1) {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+			} else {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+			}
 
-	  if ((recepcion[1] >> 1) & 1) {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
-	  } else {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
-	  }
+			if ((recepcion[1] >> 1) & 1) {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+			} else {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+			}
 
-	  if ((recepcion[1] >> 2) & 1) {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
-	  } else {
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
-	  }
+			if ((recepcion[1] >> 2) & 1) {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
+			} else {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
+			}
 
-	  // Seteo de duty cycle del PWM
-	  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, recepcion[2]); // PB5
-	  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, recepcion[3]); // PB6
-	}
+			// Seteo de duty cycle del PWM
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, recepcion[2]); // PB5
+			__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, recepcion[3]); // PB6
+		}
 
     osDelay(1);
   }
   /* USER CODE END 5 */
 }
 
-/* USER CODE END 4 */
 
 
 /**
@@ -803,5 +769,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
