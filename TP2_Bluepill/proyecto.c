@@ -54,7 +54,6 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
-osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
 osThreadId uart1TaskHandle;
 osThreadId uart3TaskHandle;
@@ -108,7 +107,7 @@ uint8_t calcular_crc(uint8_t* cadena, uint8_t longitud) {
 
 	const uint8_t poly = 0x07;
 	uint8_t crc = 0x00;
-	for (size_t i = 0; i < longitud; ++i) {
+	for (size_t i = 0; i < longitud - 1; ++i) {
 		crc ^= cadena[i];
 		for (uint8_t j = 0; j < 8; ++j) {
 			if (crc & 0x80)
@@ -186,7 +185,7 @@ int main(void)
   HAL_ADC_Start(&hadc1);  // Inicia la conversión continua
 
   // Inicio sensor BMP280
-  //BMP280_Init(&hspi2, GPIOB, GPIO_PIN_12);
+  BMP280_Init(&hspi2, GPIOB, GPIO_PIN_12);
 
 
   /* USER CODE END 2 */
@@ -207,6 +206,9 @@ int main(void)
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
+  /* Create the thread(s) */
+  /* definition and creation of defaultTask */
+
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   osThreadDef(uart3Task, StartUart3Task, osPriorityHigh, 0, 128);
@@ -219,7 +221,7 @@ int main(void)
   osThreadDef(salidasDatosTask, StartSalidasDatosTask, osPriorityNormal, 0, 128);
   salidasDatosTaskHandle = osThreadCreate(osThread(salidasDatosTask), NULL);
 
-  osThreadDef(entradasDatosTask, StartEntradasDatosTask, osPriorityNormal, 0, 128);
+  osThreadDef(entradasDatosTask, StartEntradasDatosTask, osPriorityNormal, 0, 256);
   entradasDatosTaskHandle = osThreadCreate(osThread(entradasDatosTask), NULL);
 
 
@@ -372,11 +374,11 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_16BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -573,10 +575,17 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PB12 PB7 PB8 PB9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -595,13 +604,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = GPIO_PIN_3|GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PB7 PB8 PB9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -624,6 +626,8 @@ void StartUart1Task(void const * argument)
 	  HAL_UART_Transmit(&huart1, transmision, sizeof(transmision), 10);
 	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
 	  HAL_UART_Receive(&huart1, recepcion, sizeof(recepcion), 500);
+
+		crc_valido = calcular_crc(recepcion, sizeof(recepcion)) == recepcion[4];
 
 	  osDelay(1);
   }
@@ -682,8 +686,8 @@ void StartEntradasDatosTask(void const * argument)
 	transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) << 1;
 	transmision[7] |= (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET) << 2;
 
-	float temp_f = 0;//BMP280_ReadTemperature();   // °C
-	float press_f =0;// BMP280_ReadPressure();     // hPa
+	float temp_f = BMP280_ReadTemperature();   // °C
+	float press_f = BMP280_ReadPressure();     // hPa
 
 	transmision[8] = (uint8_t)temp_f;
 	transmision[9] = (((uint16_t)press_f) >> 8) & 0xFF;
@@ -736,7 +740,15 @@ void StartSalidasDatosTask(void const * argument)
   /* USER CODE END 5 */
 }
 
+/* USER CODE END 4 */
 
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
 
 /**
   * @brief  This function is executed in case of error occurrence.
